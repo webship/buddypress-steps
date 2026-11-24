@@ -79,7 +79,9 @@ fi
 ddev wp plugin install buddypress ${BUDDYPRESS_VERSION:+--version="$BUDDYPRESS_VERSION"} --activate
 # The plugin's own install (its tables, its default components and its version), which a plugin activated from the
 # command line leaves to the first page of the administration: run there, it would turn off the components below.
-ddev wp eval 'bp_version_updater();'
+# And the welcome screen its activation asks for: for 30 seconds, the first request of the administration goes there
+# instead, even a visitor's request for the activity stream (admin-ajax.php), whose list then never comes.
+ddev wp eval 'bp_version_updater(); delete_transient( "_bp_activation_redirect" ); delete_transient( "_bp_is_new_install" );'
 
 # The accounts of the suite (the installer's account is the administrator), each a subscriber of the site.
 for account in organizer moderator member newcomer; do

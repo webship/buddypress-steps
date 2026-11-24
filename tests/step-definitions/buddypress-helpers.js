@@ -473,7 +473,7 @@ async function traceSweep(world, startedAt) {
   if (!traced.ids.length) return;
   const since = startedAt - TRACE_MARGIN_MS;
   const problems = [];
-  const items = await listAll(traced, `/buddypress/v1/activity?type=${TRACE_TYPES.join(',')}&display_comments=stream&status=all&order=DESC`,
+  const items = await listAll(traced, `/buddypress/v1/activity?type=${TRACE_TYPES.join(',')}&display_comments=stream&status=all&order=desc`,
     (page) => page.length && gmtTime(page[page.length - 1].date_gmt) < since);
   for (const item of items) {
     if (!traced.ids.includes(Number(item.user_id)) || !(gmtTime(item.date_gmt) >= since)) continue;

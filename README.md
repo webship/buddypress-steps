@@ -185,7 +185,8 @@ A green first run prints every step, then the summary (the starter feature of `n
 scenarios above, passed) and the HTML report it wrote:
 
 ```
-FIRSTRUN
+3 scenarios (3 passed)
+11 steps (11 passed)
 ```
 
 From there, copy the features of [`tests/features/`](tests/features/) (they also ship in the package, under
@@ -336,8 +337,10 @@ runs against, in a DDEV project of type `wordpress` with PHP 8.4 and Node.js 24 
 - the latest WordPress, with pretty addresses and registration open, and the theme it installs with (a block theme), or
   the classic theme `THEME` names;
 - BuddyPress from the plugin directory: its own install first (a plugin activated from WP-CLI leaves it to the first
-  page of the administration, which would turn the components below off again), then the components a community uses,
-  with the plugin's own command (`wp bp component activate`);
+  page of the administration, which would turn the components below off again), without the welcome screen its
+  activation asks for (for 30 seconds the first request of the administration goes there, even a visitor's request for
+  the activity stream, which then stays empty), then the components a community uses, with the plugin's own command
+  (`wp bp component activate`);
 - the five accounts of [Test users](#test-users);
 - the test content, written by [`site/community-site.php`](site/community-site.php) with the plugin's own functions, so
   the counts, the stream and the notifications are the ones the plugin keeps:
@@ -440,7 +443,7 @@ One example of each step; the JSDoc block above each definition holds five.
 - `When I delete the group "Webship test group"`
 - `Given there is no group "Webship test group"`
 
-### `buddypress-messages.steps.js` (13)
+### `buddypress-messages.steps.js` (14)
 
 - `When I send the message "Webship test message" to "member" saying "Hello from a test."`
 - `When I send the message "Webship test message" to nobody saying "Nobody gets this."`
@@ -455,6 +458,7 @@ One example of each step; the JSDoc block above each definition holds five.
 - `When I go to my notifications`
 - `Then my notifications should list "You have a friendship request from Newcomer Test"`
 - `When I mark the notification "You have a friendship request from Newcomer Test" as read`
+- `When I delete the notification "You have a friendship request from Newcomer Test"`
 
 ### `buddypress-site.steps.js` (9)
 
@@ -524,8 +528,11 @@ was opened as the account the step works as, its lists, labels and messages note
 works found (the "Loading …" feedback of a directory, the words a friendship button turns into, the feedback of a group
 left, the address a sent message lands on). The failures of the first runs went back to the browser before the step
 changed: the components the first page of the administration turned off again after an install from the command line,
-the groups directory that answers "not found" until the rewrite rules are written again, a row's count that stays until
-a reload, the search term that stays for the other tabs of a directory, and a conversation deleted for one side only.
+the activity stream a visitor found empty on CI, where the suite starts within the 30 seconds the activation's welcome
+screen catches the first request of the administration (the stream's own, through `admin-ajax.php`), the groups
+directory that answers "not found" until the rewrite rules are written again, a row's count that stays until a reload,
+the search term that stays for the other tabs of a directory, a conversation deleted for one side only, and the build's
+message read again when a cleanup went back to the conversation a scenario ended on.
 
 ## License
 

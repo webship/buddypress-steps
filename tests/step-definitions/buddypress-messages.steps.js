@@ -41,9 +41,12 @@ async function rememberUnread(world, handle) {
   const unread = answer && answer.status === 200 && Array.isArray(answer.json) ? answer.json.filter((t) => Number(t.unread_count) > 0) : [];
   world.communityUnread[handle] = unread.map((t) => ({ id: t.id, subject: h.clean((t.subject && (t.subject.rendered || t.subject.raw)) || '') }));
   if (!unread.length) return;
-  h.afterScenario(world, () => h.asAccount(world, handle, async () => {
+  // From a context of its own: going back to the page the scenario ended on (a conversation, an inbox) would read it
+  // again.
+  h.afterScenario(world, () => h.apiAs(world, handle, async (call) => {
     for (const t of world.communityUnread[handle] || []) {
-      await restRequest(world, `/buddypress/v1/messages/${t.id}`, { method: 'PUT', data: { unread: true } }).catch(() => null);
+      const answer = await call(`/buddypress/v1/messages/${t.id}`, { method: 'PUT', data: { unread: true } }).catch(() => null);
+      if (!answer || answer.status !== 200) throw new Error(`The conversation "${t.subject}" of ${handle} could not be marked unread again (${answer ? answer.status : 'no answer'}).`);
     }
   }), true);
 }
@@ -57,17 +60,17 @@ function removeConversationLater(world, subject) {
 }
 
 async function removeConversation(world, subject) {
-  // Through the site's API, as each account: an inbox opened in the browser would read its first conversation.
-  const { restRequest } = require('@webship-js/wordpress-steps/tests/step-definitions/wordpress-helpers');
+  // Through the site's API, as each account, from a context of its own: an inbox opened in the browser would read its
+  // first conversation.
   for (const handle of Object.keys(world.parameters.users || {})) {
-    await h.asAccount(world, handle, async () => {
+    await h.apiAs(world, handle, async (call) => {
       for (const box of ['inbox', 'sentbox']) {
-        const answer = await restRequest(world, `/buddypress/v1/messages?box=${box}&per_page=50&search=${encodeURIComponent(subject)}`).catch(() => null);
+        const answer = await call(`/buddypress/v1/messages?box=${box}&per_page=50&search=${encodeURIComponent(subject)}`).catch(() => null);
         const found = answer && answer.status === 200 && Array.isArray(answer.json) ? answer.json : [];
         for (const t of found) {
           const title = h.clean((t.subject && (t.subject.rendered || t.subject.raw)) || '');
           if (!h.same(title, subject)) continue;
-          await restRequest(world, `/buddypress/v1/messages/${t.id}`, { method: 'DELETE' }).catch(() => null);
+          await call(`/buddypress/v1/messages/${t.id}`, { method: 'DELETE' }).catch(() => null);
         }
       }
     });

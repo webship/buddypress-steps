@@ -321,6 +321,51 @@ async function asAccount(world, handle, work) {
 }
 
 /**
+ * The site's API as an account of the users registry, from a browser context of its own that opens no page: the page
+ * of the scenario stays as it is, and nothing is read on the way (an inbox opened in the browser reads its first
+ * conversation, and a page left on a conversation reads it again when it is opened). The account logs in at the login
+ * form's address; `work` gets `call(route, { method, data })`, which answers `{ status, json }` for a route of
+ * `/wp-json`.
+ */
+async function apiAs(world, handle, work) {
+  const { username, password } = resolveUser(world, handle);
+  const root = siteRoot(world.launchUrl);
+  const browser = world.playwrightBrowser || world.context.browser();
+  const context = await browser.newContext(transportOptions());
+  try {
+    const request = context.request;
+    await request.get(`${root}/wp-login.php`, { failOnStatusCode: false });
+    await request.post(`${root}/wp-login.php`, { form: { log: username, pwd: password, testcookie: '1' }, failOnStatusCode: false, maxRedirects: 0 });
+    const nonce = (await (await request.get(`${root}/wp-admin/admin-ajax.php?action=rest-nonce`, { failOnStatusCode: false })).text()).trim();
+    const headers = { Accept: 'application/json' };
+    if (/^[a-f0-9]{6,}$/i.test(nonce)) headers['X-WP-Nonce'] = nonce;
+    const call = async (route, { method = 'GET', data } = {}) => {
+      const response = await request.fetch(`${root}/wp-json${route}`, { method, data, headers, failOnStatusCode: false });
+      let json = null;
+      try { json = JSON.parse(await response.text()); } catch { /* not JSON */ }
+      return { status: response.status(), json };
+    };
+    return await work(call);
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+/** The transport settings of the suite's browser contexts (playwright.config's HTTPS setting, proxy, certificates). */
+function transportOptions() {
+  let from = {};
+  try {
+    const config = require(require('path').join(process.cwd(), 'playwright.config'));
+    from = (config && (config.contextOptions || (config.default && config.default.contextOptions))) || {};
+  } catch { /* no configuration: the defaults */ }
+  const options = {};
+  for (const key of ['ignoreHTTPSErrors', 'proxy', 'clientCertificates']) {
+    if (from[key] !== undefined) options[key] = from[key];
+  }
+  return options;
+}
+
+/**
  * Run a removal once the scenario ends, whatever its outcome (the After hook of buddypress-defaults.js); a late one
  * runs after all the others (what they do may undo it: a removal that opens an inbox reads its first conversation).
  */
@@ -417,6 +462,7 @@ module.exports = {
   tabsOf,
   tabLabel,
   asAccount,
+  apiAs,
   afterScenario,
   addressOf,
   mailTo,

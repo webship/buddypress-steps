@@ -42,12 +42,17 @@ async function rememberUnread(world, handle) {
   world.communityUnread[handle] = unread.map((t) => ({ id: t.id, subject: h.clean((t.subject && (t.subject.rendered || t.subject.raw)) || '') }));
   if (!unread.length) return;
   // From a context of its own: going back to the page the scenario ended on (a conversation, an inbox) would read it
-  // again.
+  // again. A conversation the scenario deleted is no longer in the inbox, and is left alone.
   h.afterScenario(world, () => h.apiAs(world, handle, async (call) => {
+    const inbox = await call('/buddypress/v1/messages?box=inbox&per_page=50').catch(() => null);
+    const present = new Set(inbox && Array.isArray(inbox.json) ? inbox.json.map((t) => t.id) : []);
+    const problems = [];
     for (const t of world.communityUnread[handle] || []) {
+      if (!present.has(t.id)) continue;
       const answer = await call(`/buddypress/v1/messages/${t.id}`, { method: 'PUT', data: { unread: true } }).catch(() => null);
-      if (!answer || answer.status !== 200) throw new Error(`The conversation "${t.subject}" of ${handle} could not be marked unread again (${answer ? answer.status : 'no answer'}).`);
+      if (!answer || answer.status !== 200) problems.push(`"${t.subject}" (${answer ? answer.status : 'no answer'})`);
     }
+    if (problems.length) throw new Error(`These conversations of ${handle} could not be marked unread again: ${problems.join(', ')}.`);
   }), true);
 }
 

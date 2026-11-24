@@ -98,9 +98,11 @@ async function eventually(world, read, ok, fail, timeout) {
  */
 async function waitForList(world, list) {
   const page = world.page;
-  const limit = budget(world) * 4;
-  await page.locator('#buddypress .bp-feedback.loading').first().waitFor({ state: 'hidden', timeout: limit }).catch(() => {});
+  // The first request of a site that was just started can take long (its code is compiled on the way): the list gets
+  // ten page budgets to come.
+  const limit = budget(world) * 10;
   await page.locator(`${list} > li, #buddypress .bp-feedback:not(.loading)`).first().waitFor({ state: 'attached', timeout: limit }).catch(() => {});
+  await page.locator('#buddypress .bp-feedback.loading').first().waitFor({ state: 'hidden', timeout: limit }).catch(() => {});
   await page.waitForTimeout(150);
 }
 

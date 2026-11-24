@@ -161,7 +161,9 @@ Then(/^the profile fields should list "([^"]*)" in "([^"]*)"$/, async function (
   if (index < 0) throw friendly({ message: `The profile fields have no group "${group}". They have ${h.listed(labels)}.`, hint: 'Log in as the administrator first.' });
   await tabs.nth(index).click();
   const panel = this.page.locator(await tabs.nth(index).getAttribute('href'));
-  const fields = (await panel.locator('fieldset legend span, fieldset legend').allInnerTexts().catch(() => [])).map((t) => h.clean(t).replace(/\s*\(.*\)\s*$/, ''));
+  // Each field's legend (its name, then "(required)" or its type), once each; the group's own heading aside.
+  const fields = [...new Set((await panel.locator('fieldset legend span, fieldset legend').allInnerTexts().catch(() => []))
+    .map((t) => h.clean(t).replace(/\s*\(.*\)\s*$/, '')).filter((t) => t && !/^Fields for /i.test(t)))];
   if (!fields.some((f) => h.same(f, field) || h.holds(f, field))) throw friendly({ message: `The group "${group}" has no field "${field}". It has ${h.listed(fields)}.`, hint: 'The fields of a group are its tab in "Users", "Profile Fields".' });
 });
 

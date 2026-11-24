@@ -22,7 +22,7 @@ Feature: Assertions of members and profiles that must fail
     Then the members directory should say "Viewing 1 - 9 of 9 active members"
 
   Scenario: Another order
-    Fails with: The members directory does not list "Organizer Test" and "Administrator Test" in this order.
+    Fails with: The members directory does not list "Organizer Test", "Administrator Test" in this order.
     Given I am not logged in
     When I go to the members directory
     And I order the members by "Alphabetical"

@@ -45,7 +45,7 @@ async function rememberUnread(world, handle) {
     for (const t of world.communityUnread[handle] || []) {
       await restRequest(world, `/buddypress/v1/messages/${t.id}`, { method: 'PUT', data: { unread: true } }).catch(() => null);
     }
-  }));
+  }), true);
 }
 
 /** Remove a conversation for every side once the scenario ends: each account of the users registry deletes it. */
@@ -57,20 +57,17 @@ function removeConversationLater(world, subject) {
 }
 
 async function removeConversation(world, subject) {
+  // Through the site's API, as each account: an inbox opened in the browser would read its first conversation.
+  const { restRequest } = require('@webship-js/wordpress-steps/tests/step-definitions/wordpress-helpers');
   for (const handle of Object.keys(world.parameters.users || {})) {
     await h.asAccount(world, handle, async () => {
       for (const box of ['inbox', 'sentbox']) {
-        for (let round = 0; round < 5; round += 1) {
-          await h.visit(world, h.profilePath(world, handle, box === 'inbox' ? 'messages' : 'messages/sentbox'));
-          await h.waitForList(world, THREADS);
-          const subjectLink = world.page.locator(`${THREADS} > li.thread-item .subject`).filter({ hasText: subject }).first();
-          if (!(await subjectLink.count())) break;
-          await subjectLink.click();
-          const del = world.page.locator('button.message-action-delete').first();
-          await del.waitFor({ state: 'visible', timeout: h.budget(world) * 2 }).catch(() => {});
-          if (!(await del.count())) break;
-          await h.clickConfirmed(world, del);
-          await world.page.waitForTimeout(1500);
+        const answer = await restRequest(world, `/buddypress/v1/messages?box=${box}&per_page=50&search=${encodeURIComponent(subject)}`).catch(() => null);
+        const found = answer && answer.status === 200 && Array.isArray(answer.json) ? answer.json : [];
+        for (const t of found) {
+          const title = h.clean((t.subject && (t.subject.rendered || t.subject.raw)) || '');
+          if (!h.same(title, subject)) continue;
+          await restRequest(world, `/buddypress/v1/messages/${t.id}`, { method: 'DELETE' }).catch(() => null);
         }
       }
     });
@@ -196,10 +193,14 @@ Given(/^(?:(?:I am |we are )+on|(?:I |we )*go to) my (inbox|sent box)$/, async f
 Then(/^the box should( not)* list the (unread )?conversation "([^"]*)"(?: with "([^"]*)")?$/, async function (notCase, unread, subject, who) {
   await h.waitForList(this, THREADS);
   const name = h.supplied(who) ? h.nameOf(this, who) : null;
+  // The inbox names the sender by its name ("From: Organizer Test"), the sent box the recipients by their login ("To:
+  // member (and 1 other)").
+  const login = h.supplied(who) ? h.memberOf(this, who).username : null;
+  const isWith = (t) => !name || h.holds(t.who, name) || (login && new RegExp(`(^|[\\s,(])${h.escapeRegExp(login)}([\\s,)]|$)`, 'i').test(t.who));
   const handle = await h.currentMember(this);
   const remembered = ((this.communityUnread || {})[handle] || []).map((t) => t.subject);
   const isUnread = (t) => t.unread || remembered.some((r) => h.same(r, t.subject));
-  await h.eventually(this, () => threads(this), (all) => all.some((t) => h.same(t.subject, subject) && (!name || h.holds(t.who, name)) && (!unread || isUnread(t))) !== Boolean(notCase), async (all) => ({
+  await h.eventually(this, () => threads(this), (all) => all.some((t) => h.same(t.subject, subject) && isWith(t) && (!unread || isUnread(t))) !== Boolean(notCase), async (all) => ({
     message: notCase ? `The box lists the conversation "${subject}".` : `The box lists no ${unread ? 'unread ' : ''}conversation "${subject}"${name ? ` with "${name}"` : ''}. It lists ${h.listed((all || []).map((t) => `${t.subject} (${t.who}${t.unread ? ', unread' : ''})`))}.`,
     hint: 'The inbox lists what came, the sent box what went.',
   }));

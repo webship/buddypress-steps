@@ -43,12 +43,15 @@ for (const [name, screen] of Object.entries(COMMUNITY_ADMIN_SCREENS)) {
 Before(function () {
   this.communityScenarioStartedAt = Date.now();
   this.communityCleanup = [];
+  this.communityLateCleanup = [];
 });
 
-// The removals the scenario's steps asked for, newest first; one that fails is reported and the others still run.
-After({ timeout: 180000 }, async function () {
-  const jobs = (this.communityCleanup || []).slice().reverse();
+// The removals the scenario's steps asked for, newest first, then the late ones; one that fails is reported and the
+// others still run.
+After({ timeout: 240000 }, async function () {
+  const jobs = [...(this.communityCleanup || []).slice().reverse(), ...(this.communityLateCleanup || [])];
   this.communityCleanup = [];
+  this.communityLateCleanup = [];
   const failures = [];
   for (const job of jobs) {
     try {

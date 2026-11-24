@@ -240,8 +240,14 @@ async function currentMember(world) {
 
 /** The account the steps of "my" profile mean: the one logged in, else a failure that says so. */
 async function me(world) {
-  const handle = await currentMember(world);
+  let handle = await currentMember(world);
   if (handle) return handle;
+  if (!/^https?:/.test(world.page.url()) || !(await world.page.locator('#wpadminbar').count())) {
+    // A blank page (another account's work just began) or a page without the toolbar: the site's own page has it.
+    await visit(world, communityPath(world, 'members'));
+    handle = await currentMember(world);
+    if (handle) return handle;
+  }
   if (!(await isLoggedIn(world).catch(() => false))) {
     throw friendly({ message: 'Nobody is logged in.', hint: 'Log in first: Given I am a logged in user with the "member" user.' });
   }
@@ -314,10 +320,14 @@ async function asAccount(world, handle, work) {
   }
 }
 
-/** Run a removal once the scenario ends, whatever its outcome (the After hook of buddypress-defaults.js). */
-function afterScenario(world, job) {
-  if (!world.communityCleanup) world.communityCleanup = [];
-  world.communityCleanup.push(job);
+/**
+ * Run a removal once the scenario ends, whatever its outcome (the After hook of buddypress-defaults.js); a late one
+ * runs after all the others (what they do may undo it: a removal that opens an inbox reads its first conversation).
+ */
+function afterScenario(world, job, late) {
+  const list = late ? 'communityLateCleanup' : 'communityCleanup';
+  if (!world[list]) world[list] = [];
+  world[list].push(job);
 }
 
 // ---------------------------------------------------------------------------

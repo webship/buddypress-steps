@@ -222,7 +222,8 @@ change, then the assertions that must fail:
 
 Every scenario that makes an update, a comment, a group or a conversation removes it again, and every friendship,
 membership, request, role, profile field, favorite, e-mail setting, read conversation and read notification it changes
-comes back when it ends: the suite leaves the site as it found it.
+comes back when it ends, with the stream items and notifications the community recorded for it: the suite leaves the
+site as it found it.
 
 The mail steps read only the mail that came since the scenario began, so a run never reads the mail of an earlier one.
 
@@ -288,6 +289,12 @@ screen`).
   favorite, an e-mail setting, a conversation or a notification read go back as they were, and an update, a comment, a
   group or a conversation made goes, each by the account that may (the administrator in the activity stream and the
   groups list, each account of the registry for a conversation).
+- **What the community records by itself goes too.** A membership or a profile field put back leaves the stream item
+  the community recorded for it ("Newcomer Test joined the group Webship Club", "Member Test's profile was updated"),
+  and a request leaves its notifications. After the removals, the manager's session of the site's API removes the
+  stream items (hidden ones and comments too) and the notifications that the accounts of the users registry got since
+  the scenario began, and puts the notifications the run found back to read or unread. Nothing of another account,
+  and nothing older than the scenario, is touched, so a real site's activity stays as it is.
 - **Failures say what was found.** `The groups list shows no "Webship Club" with "Public Group / 9 members". It shows
   "Webship Club (Public Group / 3 members)", "Design Circle (Private Group / 2 members)".` with a hint on where to look.
 
@@ -355,6 +362,9 @@ runs against, in a DDEV project of type `wordpress` with PHP 8.4 and Node.js 24 
 
 CI builds it twice, see [`.github/workflows/test.yml`](.github/workflows/test.yml): on the block theme WordPress
 installs with and PHP 8.4 (with the assertions that must fail), and on a classic theme (Twenty Twenty-One) and PHP 8.2.
+Each lane runs the suite twice and compares what the community holds before the first run and after each run
+(`COUNTS_ONLY=1`): its stream items by type, hidden ones and comments included, each account's notifications and how
+many are unread, its unread messages, friends, groups and favorites, and each group's members.
 
 After a run that was stopped half way, `RESET_ONLY=1 SITE_DIR="$PWD/buddypress-site"
 buddypress-steps/.github/scripts/build-ddev-site.sh` puts the community back as the build left it: every update,

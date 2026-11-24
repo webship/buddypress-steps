@@ -87,11 +87,24 @@ jobs:
           echo "Built: $LAUNCH_URL, default: $DEFAULT_URL"
           test "${LAUNCH_URL%/}" = "$DEFAULT_URL"
 
+      - name: Count what the community holds (a run must leave it as it found it)
+        run: COUNTS_ONLY=1 .github/scripts/build-ddev-site.sh | tee "$RUNNER_TEMP/counts-built.txt"
+
       - name: Run the test suite
         run: npx cucumber-js
 
+      - name: Check the run left the community as it found it (stream items, notifications, messages, friends, groups)
+        run: |
+          COUNTS_ONLY=1 .github/scripts/build-ddev-site.sh > "$RUNNER_TEMP/counts-run-1.txt"
+          diff -u "$RUNNER_TEMP/counts-built.txt" "$RUNNER_TEMP/counts-run-1.txt"
+
       - name: Run the test suite again (it leaves the site as it found it)
         run: npx cucumber-js
+
+      - name: Check the second run left the community as it found it
+        run: |
+          COUNTS_ONLY=1 .github/scripts/build-ddev-site.sh > "$RUNNER_TEMP/counts-run-2.txt"
+          diff -u "$RUNNER_TEMP/counts-built.txt" "$RUNNER_TEMP/counts-run-2.txt"
 
       - name: Run the assertions that must fail
         if: matrix.must_fail

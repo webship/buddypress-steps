@@ -12,6 +12,7 @@
 // Please wait." meanwhile), a member or a group has its header (`#item-header`), its navigation (`nav#object-nav`),
 // the navigation of a tab (`nav#subnav`) and its body (`#item-body`), and every outcome is a `.bp-feedback` box.
 
+const path = require('path');
 const { friendly, gotoUrl } = require('webship-js/tests/step-definitions/webship');
 const {
   budget,
@@ -365,6 +366,144 @@ function transportOptions() {
   return options;
 }
 
+// ---------------------------------------------------------------------------
+// What the community records by itself while a scenario runs
+// ---------------------------------------------------------------------------
+
+// The stream items the community records for what a member does: every type but last_activity (one row a member,
+// updated in place). A membership or a field put back leaves its "joined the group" or "profile was updated" behind.
+const TRACE_TYPES = ['activity_update', 'activity_comment', 'new_member', 'new_avatar', 'updated_profile', 'friendship_accepted', 'friendship_created', 'created_group', 'joined_group', 'group_details_updated'];
+
+// The clocks of the test runner and of the site, a little apart.
+const TRACE_MARGIN_MS = 3000;
+
+// Per site, for the run: the manager's session of the site's API (a request context of its own, kept for the run),
+// the user ids of the accounts of the users registry, and their notifications as the run found them (read or unread).
+const TRACE_RUNS = new Map();
+
+/** Playwright, as webship-js has it. */
+function playwrightModule() {
+  const from = [path.dirname(require.resolve('webship-js/package.json')), process.cwd()];
+  return require(require.resolve('playwright', { paths: from }));
+}
+
+/** The manager's session of the site's API for the run, made at the first scenario of a site. */
+async function traceRun(world) {
+  const root = siteRoot(world.launchUrl);
+  if (TRACE_RUNS.has(root)) return TRACE_RUNS.get(root);
+  const run = (async () => {
+    const { username, password } = resolveUser(world, manager(world));
+    const request = await playwrightModule().request.newContext(transportOptions());
+    await request.get(`${root}/wp-login.php`, { failOnStatusCode: false });
+    await request.post(`${root}/wp-login.php`, { form: { log: username, pwd: password, testcookie: '1' }, failOnStatusCode: false, maxRedirects: 0 });
+    const nonce = (await (await request.get(`${root}/wp-admin/admin-ajax.php?action=rest-nonce`, { failOnStatusCode: false })).text()).trim();
+    if (!/^[a-f0-9]{6,}$/i.test(nonce)) {
+      await request.dispose().catch(() => {});
+      throw new Error(`The manager account ("${manager(world)}") could not sign in to the site's API, so what the community records by itself is not removed.`);
+    }
+    const headers = { Accept: 'application/json', 'X-WP-Nonce': nonce };
+    const call = async (route, { method = 'GET', data } = {}) => {
+      const response = await request.fetch(`${root}/wp-json${route}`, { method, data, headers, failOnStatusCode: false });
+      let json = null;
+      try { json = JSON.parse(await response.text()); } catch { /* not JSON */ }
+      return { status: response.status(), json, pages: Number(response.headers()['x-wp-totalpages'] || 1) };
+    };
+    const users = await call('/wp/v2/users?context=edit&per_page=100');
+    const byLogin = new Map((Array.isArray(users.json) ? users.json : []).map((u) => [String(u.username || '').toLowerCase(), u.id]));
+    const ids = [];
+    for (const handle of Object.keys(world.parameters.users || {})) {
+      let login = '';
+      try { login = resolveUser(world, handle).username; } catch { continue; }
+      const id = byLogin.get(String(login).toLowerCase());
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    const traced = { request, call, ids, baseline: new Map() };
+    for (const n of await notificationsOf(traced)) traced.baseline.set(n.id, Number(n.is_new));
+    return traced;
+  })();
+  TRACE_RUNS.set(root, run);
+  run.catch(() => TRACE_RUNS.delete(root));
+  return run;
+}
+
+/** Every page of a list of the API (an answer that is not a list ends it). */
+async function listAll(traced, route, stop) {
+  const all = [];
+  for (let page = 1; page <= 20; page += 1) {
+    const answer = await traced.call(`${route}${route.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
+    if (answer.status !== 200 || !Array.isArray(answer.json)) {
+      if (page === 1) throw new Error(`The site's API answered ${answer.status} to ${route}.`);
+      break;
+    }
+    all.push(...answer.json);
+    if (page >= answer.pages || (stop && stop(answer.json))) break;
+  }
+  return all;
+}
+
+/** The notifications of the accounts of the users registry, read and unread. */
+async function notificationsOf(traced) {
+  if (!traced.ids.length) return [];
+  const users = traced.ids.map((id) => `user_ids[]=${id}`).join('&');
+  return [
+    ...(await listAll(traced, `/buddypress/v1/notifications?${users}&is_new=1`)),
+    ...(await listAll(traced, `/buddypress/v1/notifications?${users}&is_new=0`)),
+  ];
+}
+
+/** A date of the API (`date_gmt`, UTC without its zone) in milliseconds. */
+function gmtTime(value) {
+  const text = String(value || '');
+  return Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(text) ? text : `${text}Z`);
+}
+
+/** The run's baseline of the community, taken before the first scenario of a site. */
+async function traceStart(world) {
+  await traceRun(world);
+}
+
+/**
+ * Put the community back where the scenario's own actions left a trace the steps did not remove: the stream items the
+ * accounts of the users registry recorded since the scenario began (a group joined, a profile updated, a friendship
+ * made; hidden ones and comments too), the notifications those accounts got since then, and the read or unread state
+ * of the notifications the run found. Nothing older than the scenario, and nothing of another account, is touched.
+ */
+async function traceSweep(world, startedAt) {
+  const traced = await traceRun(world);
+  if (!traced.ids.length) return;
+  const since = startedAt - TRACE_MARGIN_MS;
+  const problems = [];
+  const items = await listAll(traced, `/buddypress/v1/activity?type=${TRACE_TYPES.join(',')}&display_comments=stream&status=all&order=DESC`,
+    (page) => page.length && gmtTime(page[page.length - 1].date_gmt) < since);
+  for (const item of items) {
+    if (!traced.ids.includes(Number(item.user_id)) || !(gmtTime(item.date_gmt) >= since)) continue;
+    const answer = await traced.call(`/buddypress/v1/activity/${item.id}`, { method: 'DELETE' }).catch(() => null);
+    // A comment goes with its update: a 404 is a comment that went first.
+    if (!answer || (answer.status !== 200 && answer.status !== 404)) problems.push(`the stream item ${item.id} (${item.type}, ${answer ? answer.status : 'no answer'})`);
+  }
+  for (const n of await notificationsOf(traced)) {
+    if (traced.baseline.has(n.id)) {
+      const was = traced.baseline.get(n.id);
+      if (Number(n.is_new) === was) continue;
+      const answer = await traced.call(`/buddypress/v1/notifications/${n.id}`, { method: 'PUT', data: { is_new: was } }).catch(() => null);
+      if (!answer || answer.status !== 200) problems.push(`the notification ${n.id} (${was ? 'unread' : 'read'} again, ${answer ? answer.status : 'no answer'})`);
+    } else if (gmtTime(n.date_gmt) >= since) {
+      const answer = await traced.call(`/buddypress/v1/notifications/${n.id}`, { method: 'DELETE' }).catch(() => null);
+      if (!answer || (answer.status !== 200 && answer.status !== 404)) problems.push(`the notification ${n.id} (${n.component}/${n.action}, ${answer ? answer.status : 'no answer'})`);
+    }
+  }
+  if (problems.length) throw new Error(`These traces of the scenario could not be removed: ${problems.join(', ')}.`);
+}
+
+/** The run's sessions of the site's API, closed once the run ends. */
+async function traceEnd() {
+  const runs = [...TRACE_RUNS.values()];
+  TRACE_RUNS.clear();
+  for (const run of runs) {
+    try { await (await run).request.dispose(); } catch { /* gone */ }
+  }
+}
+
 /**
  * Run a removal once the scenario ends, whatever its outcome (the After hook of buddypress-defaults.js); a late one
  * runs after all the others (what they do may undo it: a removal that opens an inbox reads its first conversation).
@@ -464,6 +603,9 @@ module.exports = {
   asAccount,
   apiAs,
   afterScenario,
+  traceStart,
+  traceSweep,
+  traceEnd,
   addressOf,
   mailTo,
   mailText,

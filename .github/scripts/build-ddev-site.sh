@@ -20,6 +20,8 @@
 #   SITE_TITLE            the name of the site                            (default Webship Community)
 #   RESET_ONLY            1: build nothing; put the community in SITE_DIR back as the build left it, after a run
 #                         that was stopped half way
+#   COUNTS_ONLY           1: build nothing; print the counts a test run must leave as it found them (CI compares
+#                         them before and after the suite)
 #
 # The accounts are configuration: this script creates them and cucumber.js names them; the features never create or
 # delete an account. Each is named after its place in the community, with one password:
@@ -58,6 +60,11 @@ cd "$SITE_DIR"
 if [ "${RESET_ONLY:-}" = "1" ]; then
   community_site reset
   echo "The community is back as the build left it."
+  exit 0
+fi
+
+if [ "${COUNTS_ONLY:-}" = "1" ]; then
+  community_site counts
   exit 0
 fi
 

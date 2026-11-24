@@ -15,10 +15,15 @@
 //
 //   3. Per scenario: the moment it began (a mail step reads only the mail that arrived since then), and the removals
 //      its steps asked for (an update, a group, a message thread a step made), run once it ends, whatever its outcome.
+//
+//   4. Per scenario, after those removals: what the community recorded by itself for the scenario's own actions
+//      (a "joined the group" or "profile was updated" stream item, a notification of a request), removed through the
+//      manager's session of the site's API, and the notifications the run found put back to read or unread. Only the
+//      accounts of the users registry, and only since the scenario began: a real site's activity is never touched.
 
 const fs = require('fs');
 const path = require('path');
-const { Before, After } = require('@cucumber/cucumber');
+const { Before, After, AfterAll } = require('@cucumber/cucumber');
 
 const WORDPRESS_STEPS_DIR = path.join(path.dirname(require.resolve('@webship-js/wordpress-steps/package.json')), 'tests', 'step-definitions');
 for (const file of fs.readdirSync(WORDPRESS_STEPS_DIR).filter((f) => f.endsWith('.js')).sort()) {
@@ -26,6 +31,7 @@ for (const file of fs.readdirSync(WORDPRESS_STEPS_DIR).filter((f) => f.endsWith(
 }
 
 const { ADMIN_SCREENS } = require('@webship-js/wordpress-steps/tests/step-definitions/wordpress-helpers');
+const h = require('./buddypress-helpers');
 
 // The screens of the community's administration, by the name a person reads in the menu or on the screen, lower case.
 const COMMUNITY_ADMIN_SCREENS = {
@@ -40,10 +46,22 @@ for (const [name, screen] of Object.entries(COMMUNITY_ADMIN_SCREENS)) {
   if (!(name in ADMIN_SCREENS)) ADMIN_SCREENS[name] = screen;
 }
 
-Before(function () {
-  this.communityScenarioStartedAt = Date.now();
+let traceWarned = false;
+
+Before({ timeout: 60000 }, async function () {
   this.communityCleanup = [];
   this.communityLateCleanup = [];
+  // The notifications as the run found them, at the first scenario of a site.
+  try {
+    await h.traceStart(this);
+  } catch (err) {
+    if (!traceWarned) {
+      traceWarned = true;
+      // eslint-disable-next-line no-console
+      console.warn(err && err.message ? err.message : String(err));
+    }
+  }
+  this.communityScenarioStartedAt = Date.now();
 });
 
 // The removals the scenario's steps asked for, newest first, then the late ones; one that fails is reported and the
@@ -60,10 +78,22 @@ After({ timeout: 240000 }, async function () {
       failures.push(err && err.message ? err.message : String(err));
     }
   }
+  if (this.communityScenarioStartedAt) {
+    try {
+      await h.traceSweep(this, this.communityScenarioStartedAt);
+    } catch (err) {
+      failures.push(err && err.message ? err.message : String(err));
+    }
+  }
   if (failures.length) {
     // eslint-disable-next-line no-console
     console.warn(`The removal of the scenario's test content met a problem: ${failures.join(' | ')}`);
   }
+});
+
+// The manager's sessions of the site's API, closed once the run ends.
+AfterAll(async function () {
+  await h.traceEnd();
 });
 
 module.exports = { WORDPRESS_STEPS_DIR, COMMUNITY_ADMIN_SCREENS };
